@@ -1,10 +1,15 @@
 # artifacts
 
-Container images for aswinkm.dev, published to GHCR as `ghcr.io/astrobot7/<name>`.
+Container images for aswinkm.dev, published (public, arm64) to GHCR as `ghcr.io/astrobot7/<name>`.
 
-| Image | What |
-|---|---|
-| [`pg-oidc-validator`](images/pg-oidc-validator/Dockerfile) | Percona's PostgreSQL 18 OAuth validator, packaged as a CloudNativePG image-volume extension |
+| Image | Source | What |
+|---|---|---|
+| [`pg-oidc-validator`](images/pg-oidc-validator/Dockerfile) | this repo | Percona's PostgreSQL 18 OAuth validator, as a CloudNativePG image-volume extension |
+| [`finmax-engine`](images/finmax-engine/source.env) | astrobot7/finmax (private) | FinMax recommendation engine |
+| [`downloads-handler`](images/downloads-handler/source.env) | astrobot7/homelab (private) | Media downloads file browser |
 
-Add an image: `images/<name>/Dockerfile` with an `ARG VERSION=...` line, and add `<name>` to the
-matrix in `.github/workflows/images.yml`. PRs build it; merging to `main` pushes it.
+Add an image as `images/<name>/Dockerfile` (with an `ARG VERSION=...` line), or as
+`images/<name>/source.env` to build a Dockerfile from another repo. See
+[`.github/workflows/images.yml`](.github/workflows/images.yml): PRs build what changed, `main` and an
+hourly check push anything whose `sha-<commit>` tag isn't published yet. Private sources are read with
+the `SOURCE_TOKEN` secret (fine-grained token, Contents: read-only on those repos).

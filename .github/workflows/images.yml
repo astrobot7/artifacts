@@ -1,32 +1,103 @@
 name: images
 
-# Builds images/<name>/Dockerfile for arm64 and pushes ghcr.io/astrobot7/<name> on main.
-# PRs only build. Tags: the Dockerfile's VERSION arg, and sha-<commit>. The source label
-# links each package to this (public) repo, so the packages are public too.
+# Builds every images/<name>/ for arm64 and pushes ghcr.io/astrobot7/<name>. The source label
+# links each package to this public repo, so the packages are public too.
+#
+#   images/<name>/Dockerfile   built from this repo. Tags: sha-<last commit touching the dir>,
+#                              the Dockerfile's `ARG VERSION`, latest.
+#   images/<name>/source.env   built from another (private) repo, checked out with the
+#                              SOURCE_TOKEN secret (fine-grained, Contents: read-only).
+#                              Tags: sha-<last source commit touching WATCH>, latest.
+#
+# An image is only built when its sha tag isn't in GHCR yet, so the hourly run is cheap and
+# picks up new commits in the source repos. PRs build (no push) whatever changed.
 on:
   push:
     branches: [main]
-    paths: ["images/**", ".github/workflows/images.yml"]
   pull_request:
-    paths: ["images/**", ".github/workflows/images.yml"]
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and push even if the tag exists
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  build:
+  plan:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        image: [pg-oidc-validator]
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force || false }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          matrix='[]'
+          for dir in images/*/; do
+            dir=${dir%/}
+            name=$(basename "$dir")
+            if [ "$EVENT" = pull_request ] && git diff --quiet "$BASE" HEAD -- "$dir" .github/workflows/images.yml; then
+              continue
+            fi
+            if [ -f "$dir/source.env" ]; then
+              REPO= REF= CONTEXT= DOCKERFILE= WATCH=
+              . "$dir/source.env"
+              path=""; [ "$WATCH" != "." ] && path="&path=$WATCH"
+              sha=$(gh api "repos/$REPO/commits?sha=$REF$path&per_page=1" --jq '.[0].sha')
+              version=""
+            else
+              REPO="" REF="" CONTEXT="$dir" DOCKERFILE="$dir/Dockerfile"
+              sha=$(git log -1 --format=%H -- "$dir")
+              version=$(sed -n 's/^ARG VERSION=//p' "$dir/Dockerfile")
+            fi
+            tag="sha-${sha:0:12}"
+            if [ "$EVENT" != pull_request ] && [ "$FORCE" != true ] && docker buildx imagetools inspect "ghcr.io/$OWNER/$name:$tag" >/dev/null 2>&1; then
+              echo "$name: $tag already published"; continue
+            fi
+            echo "$name: build $tag"
+            matrix=$(jq -c --arg n "$name" --arg r "$REPO" --arg ref "${REF:-$sha}" --arg c "$CONTEXT" \
+              --arg f "$DOCKERFILE" --arg t "$tag" --arg v "$version" \
+              '. + [{name:$n, repo:$r, ref:$ref, context:$c, dockerfile:$f, tag:$t, version:$v}]' <<<"$matrix")
+          done
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.image.name }}
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        if: matrix.image.repo == ''
+      - uses: actions/checkout@v7
+        if: matrix.image.repo != ''
+        with:
+          repository: ${{ matrix.image.repo }}
+          ref: ${{ matrix.image.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          persist-credentials: false
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
-      - id: version
-        run: echo "version=$(sed -n 's/^ARG VERSION=//p' images/${{ matrix.image }}/Dockerfile)" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
@@ -35,13 +106,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v7
         with:
-          context: images/${{ matrix.image }}
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          provenance: false # a single plain manifest: CNPG mounts it as an image volume
+          provenance: false # one plain manifest (CNPG mounts pg-oidc-validator as an image volume)
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}:latest
+            ${{ matrix.image.version && format('ghcr.io/{0}/{1}:{2}', github.repository_owner, matrix.image.name, matrix.image.version) || '' }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
