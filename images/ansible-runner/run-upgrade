@@ -1,0 +1,85 @@
+#!/bin/bash
+# Runs ansible/upgrade.yml from astrobot7/docker-compose against UPGRADE_HOSTS and POSTs the
+# result to n8n. The repo comes from Flux (GitRepository flux-system/flux-system): the same
+# commit the cluster is reconciled to, no GitHub credentials needed.
+#
+# Env:
+#   UPGRADE_MODE      plan | apply
+#   UPGRADE_HOSTS     inventory names, comma-separated (e.g. monpi,vault)
+#   CALLBACK_URL      n8n Wait-node resume URL (optional; skipped when empty)
+#   CALLBACK_TOKEN    sent as X-Upgrade-Token
+#   NODE_NAME         this pod's node (downward API); apply refuses to drain it
+#   SSH_KEY_FILE      default /etc/upgrader/ssh/id_ed25519
+#   KNOWN_HOSTS_FILE  default /etc/upgrader/known-hosts/known_hosts
+set -uo pipefail
+
+: "${UPGRADE_MODE:?}" "${UPGRADE_HOSTS:?}"
+SSH_KEY_FILE=${SSH_KEY_FILE:-/etc/upgrader/ssh/id_ed25519}
+KNOWN_HOSTS_FILE=${KNOWN_HOSTS_FILE:-/etc/upgrader/known-hosts/known_hosts}
+SOURCE=${SOURCE:-flux-system/flux-system}
+
+work=$(mktemp -d)
+log="$work/ansible.log"
+results="$work/results"
+mkdir -p "$results"
+
+# Result for n8n: per-host JSON from the role, plus the exit code and the end of the log.
+report() {
+  local rc=$1
+  [ -n "${CALLBACK_URL:-}" ] || return 0
+  local body
+  body=$(jq -n \
+    --arg mode "$UPGRADE_MODE" --arg hosts "$UPGRADE_HOSTS" --arg runner "${NODE_NAME:-}" \
+    --arg revision "$(cat "$work/revision" 2>/dev/null)" --argjson rc "$rc" \
+    --rawfile log <(tail -n 80 "$log" 2>/dev/null) \
+    --slurpfile results <(cat "$results"/*.json 2>/dev/null) \
+    '{status: (if $rc == 0 then "ok" else "failed" end), exit_code: $rc, mode: $mode,
+      hosts: ($hosts | split(",")), runner: $runner, revision: $revision,
+      results: $results, log_tail: $log}')
+  # n8n runs on pandora: while pandora reboots (or n8n restarts) keep retrying, up to an hour.
+  for _ in $(seq 1 120); do
+    if curl -fsS -m 30 -X POST -H 'Content-Type: application/json' \
+         -H "X-Upgrade-Token: ${CALLBACK_TOKEN:-}" --data-binary "$body" "$CALLBACK_URL" >/dev/null; then
+      echo "reported to n8n"
+      return 0
+    fi
+    sleep 30
+  done
+  echo "could not reach n8n at $CALLBACK_URL" >&2
+}
+
+run() {
+  local ns=${SOURCE%/*} name=${SOURCE#*/} url digest
+  echo "== fetching the repo from GitRepository $SOURCE"
+  url=$(kubectl -n "$ns" get gitrepository "$name" -o 'jsonpath={.status.artifact.url}') || return 1
+  digest=$(kubectl -n "$ns" get gitrepository "$name" -o 'jsonpath={.status.artifact.digest}') || return 1
+  kubectl -n "$ns" get gitrepository "$name" -o 'jsonpath={.status.artifact.revision}' > "$work/revision" || return 1
+  curl -fsS -o "$work/repo.tar.gz" "$url" || return 1
+  echo "${digest#sha256:}  $work/repo.tar.gz" | sha256sum -c - || return 1
+  mkdir -p "$work/repo" && tar -xzf "$work/repo.tar.gz" -C "$work/repo" || return 1
+  echo "revision $(cat "$work/revision")"
+
+  # ssh refuses group-readable keys; the Secret mount is 0440.
+  install -d -m 0700 "$HOME/.ssh"
+  install -m 0600 "$SSH_KEY_FILE" "$HOME/.ssh/id_ed25519"
+  install -m 0644 "$KNOWN_HOSTS_FILE" "$HOME/.ssh/known_hosts"
+
+  cd "$work/repo/ansible" || return 1
+  export ANSIBLE_VARS_ENABLED=host_group_vars   # no age key here: skip *.sops.yaml vars
+  export ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_RETRIES=10 ANSIBLE_FORCE_COLOR=0
+  export ANSIBLE_PRIVATE_KEY_FILE="$HOME/.ssh/id_ed25519"
+  # The inventory's ansible_host names resolve differently per site; pods reach every node
+  # on its Tailscale IP (the IPs in known_hosts).
+  ansible-inventory -i inventory/hosts.yml --list \
+    | jq '{all: {hosts: (._meta.hostvars | map_values({ansible_host: .tailscale_ip}))}}' \
+    > "$work/tailscale.json" || return 1
+
+  echo "== ansible-playbook upgrade.yml mode=$UPGRADE_MODE hosts=$UPGRADE_HOSTS"
+  ansible-playbook -i inventory/hosts.yml -i "$work/tailscale.json" upgrade.yml \
+    --limit "$UPGRADE_HOSTS" -e "upgrade_mode=$UPGRADE_MODE" -e "upgrade_result_dir=$results"
+}
+
+run 2>&1 | tee "$log"
+rc=${PIPESTATUS[0]}
+report "$rc"
+exit "$rc"
