@@ -5,6 +5,7 @@ Container images for aswinkm.dev, published (public, arm64) to GHCR as `ghcr.io/
 | Image | Source | What |
 |---|---|---|
 | [`pg-oidc-validator`](images/pg-oidc-validator/Dockerfile) | this repo | Percona's PostgreSQL 18 OAuth validator, as a CloudNativePG image-volume extension |
+| [`psql`](images/psql/Dockerfile) | this repo | psql 18 with OAuth device-flow support (`libpq-oauth`), for Pocket-ID logins to postgres |
 | [`finmax-engine`](images/finmax-engine/source.env) | astrobot7/finmax (private) | FinMax recommendation engine |
 | [`downloads-handler`](images/downloads-handler/source.env) | astrobot7/homelab (private) | Media downloads file browser |
 
