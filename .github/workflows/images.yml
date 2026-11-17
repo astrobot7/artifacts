@@ -1,16 +1,18 @@
 name: images
 
-# Builds every images/<name>/ for arm64 and pushes ghcr.io/astrobot7/<name>. The source label
-# links each package to this public repo, so the packages are public too.
+# Builds every images/<name>/ (linux/arm64 unless PLATFORMS says otherwise) and pushes
+# ghcr.io/astrobot7/<name>. The source label links each package to this public repo, so the
+# packages are public too.
 #
 #   images/<name>/Dockerfile   built from this repo. Tags: sha-<last commit touching the dir>,
 #                              the Dockerfile's `ARG VERSION`, latest.
 #   images/<name>/source.env   built from another (private) repo, checked out with the
 #                              SOURCE_TOKEN secret (fine-grained, Contents: read-only).
 #                              Tags: sha-<last source commit touching WATCH>, latest.
+#                              Optional PLATFORMS=linux/amd64,linux/arm64 (default linux/arm64).
 #
-# An image is only built when its sha tag isn't in GHCR yet, so the hourly run is cheap and
-# picks up new commits in the source repos. PRs build (no push) whatever changed.
+# An image is only built when its sha tag isn't in GHCR yet or lacks one of its platforms, so
+# the hourly run is cheap and picks up new commits in the source repos. PRs build (no push) whatever changed.
 on:
   push:
     branches: [main]
@@ -46,6 +48,17 @@ jobs:
         run: |
           set -euo pipefail
           matrix='[]'
+          # Platforms of a published tag: an index lists them; a plain manifest (the old
+          # arm64-only builds) is read as linux/arm64. Fails if the tag doesn't exist.
+          published_platforms() {
+            local raw
+            raw=$(docker buildx imagetools inspect --raw "$1" 2>/dev/null) || return 1
+            if jq -e '.manifests' <<<"$raw" >/dev/null; then
+              jq -r '[.manifests[].platform | select(.os != "unknown") | "\(.os)/\(.architecture)"] | join(" ")' <<<"$raw"
+            else
+              echo linux/arm64
+            fi
+          }
           for dir in images/*/; do
             dir=${dir%/}
             name=$(basename "$dir")
@@ -53,24 +66,29 @@ jobs:
               continue
             fi
             if [ -f "$dir/source.env" ]; then
-              REPO= REF= CONTEXT= DOCKERFILE= WATCH=
+              REPO='' REF='' CONTEXT='' DOCKERFILE='' WATCH='' PLATFORMS=''
               . "$dir/source.env"
               path=""; [ "$WATCH" != "." ] && path="&path=$WATCH"
               sha=$(gh api "repos/$REPO/commits?sha=$REF$path&per_page=1" --jq '.[0].sha')
               version=""
             else
-              REPO="" REF="" CONTEXT="$dir" DOCKERFILE="$dir/Dockerfile"
+              REPO="" REF="" CONTEXT="$dir" DOCKERFILE="$dir/Dockerfile" PLATFORMS=""
               sha=$(git log -1 --format=%H -- "$dir")
               version=$(sed -n 's/^ARG VERSION=//p' "$dir/Dockerfile")
             fi
             tag="sha-${sha:0:12}"
-            if [ "$EVENT" != pull_request ] && [ "$FORCE" != true ] && docker buildx imagetools inspect "ghcr.io/$OWNER/$name:$tag" >/dev/null 2>&1; then
-              echo "$name: $tag already published"; continue
+            platforms=${PLATFORMS:-linux/arm64}
+            if [ "$EVENT" != pull_request ] && [ "$FORCE" != true ] && published=$(published_platforms "ghcr.io/$OWNER/$name:$tag"); then
+              missing=$(comm -23 <(tr , '\n' <<<"$platforms" | sort) <(tr ' ' '\n' <<<"$published" | sort))
+              if [ -z "$missing" ]; then
+                echo "$name: $tag already published ($published)"; continue
+              fi
+              echo "$name: $tag lacks ${missing//$'\n'/ }"
             fi
             echo "$name: build $tag"
             matrix=$(jq -c --arg n "$name" --arg r "$REPO" --arg ref "${REF:-$sha}" --arg c "$CONTEXT" \
-              --arg f "$DOCKERFILE" --arg t "$tag" --arg v "$version" \
-              '. + [{name:$n, repo:$r, ref:$ref, context:$c, dockerfile:$f, tag:$t, version:$v}]' <<<"$matrix")
+              --arg f "$DOCKERFILE" --arg t "$tag" --arg v "$version" --arg p "$platforms" \
+              '. + [{name:$n, repo:$r, ref:$ref, context:$c, dockerfile:$f, tag:$t, version:$v, platforms:$p}]' <<<"$matrix")
           done
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
@@ -108,7 +126,7 @@ jobs:
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
-          platforms: linux/arm64
+          platforms: ${{ matrix.image.platforms }}
           push: ${{ github.event_name != 'pull_request' }}
           provenance: false # one plain manifest (CNPG mounts pg-oidc-validator as an image volume)
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
