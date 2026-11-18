@@ -1,0 +1,3 @@
+# 5.x needs NetBox >= 4.7.0. No dependencies of its own.
+netbox-topology-views==5.0.2 \
+    --hash=sha256:84975803e0972fa2c5fab463b009a8b5154784562275e8488e65fd45b1ab7eff
