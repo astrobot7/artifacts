@@ -1,5 +1,5 @@
 # Replaces netbox-docker's empty /etc/netbox/config/plugins.py.
-PLUGINS = ["netbox_topology_views"]
+PLUGINS = ["netbox_topology_views", "netbox_dns"]
 
 PLUGINS_CONFIG = {
     "netbox_topology_views": {
