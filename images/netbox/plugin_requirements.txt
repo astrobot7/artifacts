@@ -1,3 +1,9 @@
 # 5.x needs NetBox >= 4.7.0. No dependencies of its own.
 netbox-topology-views==5.0.2 \
     --hash=sha256:84975803e0972fa2c5fab463b009a8b5154784562275e8488e65fd45b1ab7eff
+# 1.7.x needs NetBox >= 4.7.0.
+netbox-plugin-dns==1.7.3 \
+    --hash=sha256:da4385f4d743bd149d672b70a32788f8ac328fc9a8a6cf8ca3e05b68c5953586
+# netbox-plugin-dns's only dependency; not in the base image.
+dnspython==2.9.2 \
+    --hash=sha256:af15f7d385a6ae2fb35a796fde2138004c8c42c7389090e2addc83e3b3340fd8
