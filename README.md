@@ -8,6 +8,7 @@ Container images for aswinkm.dev, published (public, arm64) to GHCR as `ghcr.io/
 | [`psql`](images/psql/Dockerfile) | this repo | psql 18 with OAuth device-flow support (`libpq-oauth`), for Pocket-ID logins to postgres |
 | [`ansible-runner`](images/ansible-runner/Dockerfile) | this repo | ansible-core, kubectl and ssh; runs the homelab's node upgrade playbook from Jobs that n8n creates |
 | [`netbox`](images/netbox/Dockerfile) | this repo | NetBox (netbox-docker) with the netbox-topology-views plugin |
+| [`openidea-sandbox`](images/openidea-sandbox/Dockerfile) | this repo | Debian userland with a non-root sshd on 2222: sandboxed SSH host for OpenIDEA remote development, amd64 + arm64 |
 | [`localsend`](images/localsend/Dockerfile) | this repo | LocalSend receiver (community CLI, auto-accepts into `--dir`), amd64 + arm64 |
 | [`finmax-engine`](images/finmax-engine/source.env) | astrobot7/finmax (private) | FinMax recommendation engine |
 | [`downloads-handler`](images/downloads-handler/source.env) | astrobot7/homelab (private) | Media downloads file browser |
