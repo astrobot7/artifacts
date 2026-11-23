@@ -3,7 +3,7 @@
 # Layout: lib/ = the validator, system/ = shared libraries it needs that the base image
 # lacks (libcurl and friends), loaded via `ld_library_path: [system]`. No compiling:
 # Percona's Debian trixie package is installed and its files are copied out.
-ARG BASE=ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:ec2ed3404e89fff99643901b58a2a34c46a46345fe69a3d96500b82f995c327b
+ARG BASE=ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:c8caac9817d2b5e5e66297a3ccf86d9fcbd68f097aa6cc00161d83f9635e88cc
 
 FROM $BASE AS builder
 ARG TARGETARCH

@@ -1,7 +1,7 @@
 # psql 18 with OAuth (device flow) support: libpq-oauth isn't in Homebrew's libpq. Used to log in
 # to the homelab postgres with Pocket-ID:
 #   docker run --rm -it ghcr.io/astrobot7/psql "host=... user=... oauth_issuer=... oauth_client_id=..."
-ARG BASE=ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:ec2ed3404e89fff99643901b58a2a34c46a46345fe69a3d96500b82f995c327b
+ARG BASE=ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:c8caac9817d2b5e5e66297a3ccf86d9fcbd68f097aa6cc00161d83f9635e88cc
 FROM $BASE
 # Image tag; Docker tags can't hold the `+` of the package version below.
 ARG VERSION=18.6-1
