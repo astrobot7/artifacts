@@ -2,7 +2,7 @@
 # created by n8n in k8s/pandora/system-upgrade). ansible-core, kubectl, ssh, curl and jq; no
 # playbooks baked in: run-upgrade fetches the repo from Flux's source-controller at start.
 # arm64 only: the Jobs run on pandora or nfs.
-ARG BASE=python:3.13-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+ARG BASE=python:3.15-slim-trixie@sha256:08a4c22c92b79ec821a7ad49768480039ee5b7accac3955228e75366e30abc8e
 FROM $BASE
 # ansible-core version (also the image tag)
 ARG VERSION=2.22.0
